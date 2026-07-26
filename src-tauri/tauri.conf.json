@@ -179,33 +179,8 @@
         ],
         "resources": {
             "resources/launcher.py": "launcher.py",
-            "resources/nrc-client.jar": "nrc-client.jar",
-            "resources/nrc-compat.jar": "nrc-compat.jar",
-            "resources/nrc-cosmetics.jar": "nrc-cosmetics.jar",
-            "resources/nrc-friends.jar": "nrc-friends.jar",
-            "resources/nrc-mcreal.jar": "nrc-mcreal.jar",
-            "resources/nrc-minigames.jar": "nrc-minigames.jar",
-            "resources/nrc-owolib.jar": "nrc-owolib.jar",
-            "resources/nrc-voicechat.jar": "nrc-voicechat.jar",
-            "resources/fabric-language-kotlin.jar": "fabric-language-kotlin.jar",
-            "resources/cloth-config.jar": "cloth-config.jar",
-            "resources/yacl.jar": "yacl.jar",
-            "resources/modmenu.jar": "modmenu.jar",
-            "resources/simple-voice-chat.jar": "simple-voice-chat.jar",
-            "resources/sodium.jar": "sodium.jar",
-            "resources/iris.jar": "iris.jar",
-            "resources/lithium.jar": "lithium.jar",
-            "resources/ferritecore.jar": "ferritecore.jar",
-            "resources/immediatelyfast.jar": "immediatelyfast.jar",
-            "resources/entityculling.jar": "entityculling.jar",
-            "resources/moreculling.jar": "moreculling.jar",
-            "resources/dynamic-fps.jar": "dynamic-fps.jar",
-            "resources/skinlayers3d.jar": "skinlayers3d.jar",
-            "resources/zoomify.jar": "zoomify.jar",
-            "resources/appleskin.jar": "appleskin.jar",
-            "resources/mousetweaks.jar": "mousetweaks.jar",
-            "resources/status-effect-bars.jar": "status-effect-bars.jar",
-            "resources/doofie-client-1.0.0.jar": "doofie-client-1.0.0.jar"
+            "resources/doofie-client-1.0.0.jar": "doofie-client-1.0.0.jar",
+            "resources/doofie-client-26.2.jar": "doofie-client-26.2.jar"
         }
     }
 }

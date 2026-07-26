@@ -1,4 +1,4 @@
-﻿use crate::config::{ProjectDirsExt, LAUNCHER_DIRECTORY};
+﻿use crate::config::{ProjectDirsExt, HTTP_CLIENT, LAUNCHER_DIRECTORY};
 use crate::error::{AppError, Result};
 use crate::integrations::doofie_packs::{self, NoriskModSourceDefinition, NoriskModpacksConfig};
 use crate::utils::download_utils::{DownloadConfig, DownloadUtils};
@@ -77,6 +77,8 @@ impl NoriskPackDownloadService {
             let mod_id = mod_entry.id.clone();
             let display_name_opt = mod_entry.display_name.clone();
             let target_clone = compatibility_target.clone();
+            let mc_ver = minecraft_version.to_string();
+            let loader_s = loader.to_string();
 
             download_futures.push(async move {
                 let display_name = display_name_opt.unwrap_or_else(|| mod_id.clone());
@@ -103,6 +105,15 @@ impl NoriskPackDownloadService {
                 };
 
                 let target_path = cache_dir_clone.join(&filename);
+
+                // Already present in the doofie cache — nothing to do.
+                if target_path.exists() {
+                    return Ok(());
+                }
+
+                // NoRisk mods are branded and are rewritten to "Doofie" on the way in.
+                let is_norisk_branded =
+                    mod_id.starts_with("nrc") || mod_id.starts_with("norisk");
 
                 match effective_source {
                     NoriskModSourceDefinition::Modrinth {
@@ -148,22 +159,84 @@ impl NoriskPackDownloadService {
                             .trim_end_matches('/')
                             .to_string();
 
-                        Self::download_maven_mod(
+                        // For NoRisk mods the pack JSON often points at an internal build that is
+                        // NOT published to the public maven repo. Resolve the real, downloadable
+                        // version from maven-metadata.xml (newest build for this loader + MC version).
+                        // The local cache file keeps the JSON-derived name so addMods still finds it.
+                        let mut download_version = effective_identifier.clone();
+                        let mut download_filename = filename.clone();
+                        if is_norisk_branded {
+                            if let Some(real) = Self::resolve_norisk_maven_version(
+                                &repo_url, group_id, artifact_id, &loader_s, &mc_ver,
+                            )
+                            .await
+                            {
+                                if real != download_version {
+                                    info!(
+                                        "[NoriskBridge] Resolved '{}' {}/{} to published maven build '{}' (JSON: '{}')",
+                                        artifact_id, mc_ver, loader_s, real, download_version
+                                    );
+                                }
+                                download_filename = format!("{}-{}.jar", artifact_id, real);
+                                download_version = real;
+                            }
+                        }
+
+                        // Primary path: download the mod directly from the maven repo. This works
+                        // for every version without anything being pre-cached.
+                        let dl_result = Self::download_maven_mod(
                             repo_url,
                             group_id.clone(),
                             artifact_id.clone(),
-                            effective_identifier,
-                            filename,
-                            target_path,
+                            download_version,
+                            download_filename,
+                            target_path.clone(),
                             None,
                         )
-                        .await
-                        .map_err(|e| {
-                            error!("Failed to download Maven mod '{}': {}", display_name, e);
-                            e
-                        })?;
+                        .await;
 
-                        Ok(())
+                        match dl_result {
+                            Ok(()) => {
+                                // Downloaded NoRisk maven jars are un-branded — rewrite to Doofie.
+                                if is_norisk_branded {
+                                    let dest = target_path.clone();
+                                    let _ = tokio::task::spawn_blocking(move || {
+                                        crate::integrations::norisk_bridge::rebrand_jar_file(&dest)
+                                    })
+                                    .await;
+                                }
+                                Ok(())
+                            }
+                            Err(e) => {
+                                // Optional offline fallback: if a matching jar happens to be in a
+                                // locally installed NoRisk launcher's cache, use it (rebranding).
+                                // This is not required — it only helps when the download failed.
+                                let art = artifact_id.clone();
+                                let loader_c = loader_s.clone();
+                                let mc_c = mc_ver.clone();
+                                let dest = target_path.clone();
+                                let copied = tokio::task::spawn_blocking(move || {
+                                    crate::integrations::norisk_bridge::provide_from_cache(
+                                        &art,
+                                        &loader_c,
+                                        &mc_c,
+                                        &dest,
+                                        is_norisk_branded,
+                                    )
+                                })
+                                .await
+                                .unwrap_or(false);
+                                if copied {
+                                    Ok(())
+                                } else {
+                                    error!(
+                                        "Failed to download Maven mod '{}': {}",
+                                        display_name, e
+                                    );
+                                    Err(e)
+                                }
+                            }
+                        }
                     }
                     NoriskModSourceDefinition::Url => {
                         // For URL mods, use the identifier as direct URL
@@ -214,6 +287,40 @@ impl NoriskPackDownloadService {
             );
             Err(errors.remove(0))
         }
+    }
+
+    /// Resolves the newest actually-published maven version for a NoRisk mod matching a
+    /// given loader + Minecraft version, by reading `maven-metadata.xml`. NoRisk pack JSON
+    /// often references internal builds that are not on the public repo, so we pick the real
+    /// one whose version ends in `+<loader>.<mcVersion>`. Returns `None` on any failure.
+    async fn resolve_norisk_maven_version(
+        repo_url: &str,
+        group_id: &str,
+        artifact_id: &str,
+        loader: &str,
+        mc_version: &str,
+    ) -> Option<String> {
+        let group_path = group_id.replace('.', "/");
+        let url = format!(
+            "{}/{}/{}/maven-metadata.xml",
+            repo_url.trim_end_matches('/'),
+            group_path,
+            artifact_id
+        );
+        let text = HTTP_CLIENT.get(&url).send().await.ok()?.text().await.ok()?;
+
+        let suffix = format!("+{}.{}", loader, mc_version);
+        let mut matches: Vec<String> = Vec::new();
+        for chunk in text.split("<version>").skip(1) {
+            if let Some(end) = chunk.find("</version>") {
+                let v = chunk[..end].trim();
+                if v.ends_with(&suffix) {
+                    matches.push(v.to_string());
+                }
+            }
+        }
+        // maven-metadata lists versions in ascending order; the last match is the newest build.
+        matches.into_iter().last()
     }
 
     /// Helper function to download a mod from a Maven repository.

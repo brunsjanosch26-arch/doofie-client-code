@@ -84,11 +84,14 @@ impl NoriskPackManager {
         info!("Fetching latest Norisk packs config from API...");
 
         match DoofieApi::get_modpacks(doofie_token, is_experimental).await {
-            Ok(new_config) => {
+            Ok(mut new_config) => {
                 debug!(
                     "Successfully fetched {} packs definitions from API.",
                     new_config.packs.len()
                 );
+                // Merge the local NoRisk launcher's full multi-version pack config on top so the
+                // backend response does not strip away the all-versions compatibility.
+                crate::integrations::norisk_bridge::merge_into(&mut new_config);
                 {
                     // Scope for the write lock
                     let mut config_guard = self.config.write().await;
@@ -193,7 +196,10 @@ impl PostInitializationHandler for NoriskPackManager {
         } else {
             self.config_path.clone()
         };
-        let loaded_config = self.load_config_internal(&load_path).await?;
+        let mut loaded_config = self.load_config_internal(&load_path).await?;
+        // Merge a locally installed NoRisk launcher's full (all-versions) pack config on top,
+        // so the doofie packs work for every Minecraft version NoRisk supports.
+        crate::integrations::norisk_bridge::merge_into(&mut loaded_config);
         let mut config_guard = self.config.write().await;
         *config_guard = loaded_config;
         drop(config_guard);
